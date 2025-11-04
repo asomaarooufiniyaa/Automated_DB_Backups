@@ -2,4 +2,5 @@ terraform.tfstate
 terraform.tfstate.backup
 .terraform/.terraform/
 /mongodata
-/node_modules
+/node_modules.terraform/
+.terraform/
