@@ -1,0 +1,35 @@
+---
+- name: Deploy application
+  hosts: web_servers
+  become: true
+  tasks:
+
+    - name: Pull Docker image from Docker Hub
+      community.docker.docker_image:
+        name: asomaaroufiniyaa/todo-api-app:latest
+        source: pull
+
+    - name: Copy nginx.conf to server
+      copy:
+        src: ../../app/nginx.conf
+        dest: /home/ubuntu/nginx.conf
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Copy docker-compose file to server
+      copy:
+        src: ../../app/docker-compose.yml
+        dest: /home/ubuntu/docker-compose.yml
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Run docker-compose v2 to start containers
+      community.docker.docker_compose_v2:
+        project_src: /home/ubuntu
+        files:
+          - docker-compose.yml
+        state: present
+        recreate: always
+        pull: always
