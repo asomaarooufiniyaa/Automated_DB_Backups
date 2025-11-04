@@ -63,11 +63,11 @@ jobs:
         working-directory: ./terraforrm
         env:
            TF_VAR_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve
 
       - name: Terraform Apply
         working-directory: ./terraforrm
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve
 
       - name: Get Terraform Outputs
         id: tf_output
