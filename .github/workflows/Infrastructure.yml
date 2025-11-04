@@ -1,0 +1,121 @@
+name: Infrastructure - Terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraforrm/**'
+      - '.github/workflows/1-infrastructure.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-north-1
+  TF_VERSION: 1.5.0
+
+jobs:
+  terraform:
+    name: Provision AWS Infrastructure
+    runs-on: ubuntu-latest
+    
+    outputs:
+      server_ip: ${{ steps.outputs.outputs.server_ip }}
+      s3_bucket: ${{ steps.outputs.outputs.s3_bucket }}
+      aws_access_key: ${{ steps.outputs.outputs.access_key }}
+      aws_secret_key: ${{ steps.outputs.outputs.secret_key }}
+    
+    defaults:
+      run:
+        working-directory: ./terraforrm
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p keys
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" > keys/id_ed25519.pub
+          chmod 644 keys/id_ed25519.pub
+          echo "SSH public key configured"
+
+      - name: Terraform Init
+        run: |
+          terraform init
+          echo "Terraform initialized"
+
+      - name: Terraform Validate
+        run: |
+          terraform validate
+          echo "Configuration is valid"
+
+      - name: Terraform Plan
+        run: |
+          terraform plan -out=tfplan -input=false
+          echo "Plan created"
+
+      - name: Terraform Apply
+        run: |
+          terraform apply -auto-approve -input=false tfplan
+          echo "Infrastructure provisioned"
+
+      - name: Get Outputs
+        id: outputs
+        run: |
+          SERVER_IP=$(terraform output -raw server_ip)
+          S3_BUCKET=$(terraform output -raw s3_bucket_name)
+          ACCESS_KEY=$(terraform output -raw github_actions_access_key_id)
+          SECRET_KEY=$(terraform output -raw github_actions_secret_access_key)
+          
+          echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
+          echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+          echo "access_key=$ACCESS_KEY" >> $GITHUB_OUTPUT
+          echo "secret_key=$SECRET_KEY" >> $GITHUB_OUTPUT
+          
+          echo "###Infrastructure Provisioned" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Server IP | \`$SERVER_IP\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| S3 Bucket | \`$S3_BUCKET\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Region | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for EC2 Instance
+        run: |
+          echo "Waiting 60 seconds for instance to initialize..."
+          sleep 60
+          
+          SERVER_IP="${{ steps.outputs.outputs.server_ip }}"
+          
+          echo "🔍 Testing SSH connectivity..."
+          for i in {1..10}; do
+            if nc -zv -w5 $SERVER_IP 22 2>&1 | grep -q succeeded; then
+              echo "SSH port is open!"
+              break
+            fi
+            echo "Attempt $i/10 - waiting 15s..."
+            sleep 15
+          done
+
+      - name: Trigger Deployment
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: infrastructure-ready
+          client-payload: |
+            {
+              "server_ip": "${{ steps.outputs.outputs.server_ip }}",
+              "s3_bucket": "${{ steps.outputs.outputs.s3_bucket }}"
+            }
