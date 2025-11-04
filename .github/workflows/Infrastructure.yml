@@ -1,41 +1,42 @@
-name: Infrastructure - Terraform
+name: Complete Infrastructure & Deployment Pipeline
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - 'terraforrm/**'
-      - '.github/workflows/1-infrastructure.yml'
+      - 'ansible/**'
+      - 'app/**'
+      - '.github/workflows/deploy.yml'
+  
   workflow_dispatch:
 
 env:
-  AWS_REGION: eu-north-1
+  AWS_REGION: eu-north-1  
   TF_VERSION: 1.5.0
+  ANSIBLE_VERSION: 2.15.0
 
 jobs:
+  # ==========================================
+  # Job 1:Terraform
+  # ==========================================
   terraform:
-    name: Provision AWS Infrastructure
+    name: Provision Infrastructure
     runs-on: ubuntu-latest
     
     outputs:
-      server_ip: ${{ steps.outputs.outputs.server_ip }}
-      s3_bucket: ${{ steps.outputs.outputs.s3_bucket }}
-      aws_access_key: ${{ steps.outputs.outputs.access_key }}
-      aws_secret_key: ${{ steps.outputs.outputs.secret_key }}
-    
-    defaults:
-      run:
-        working-directory: ./terraforrm
+      server_ip: ${{ steps.tf_output.outputs.server_ip }}
+      s3_bucket: ${{ steps.tf_output.outputs.s3_bucket }}
     
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -44,78 +45,194 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup SSH Key
+      - name: Setup SSH Key for Terraform
         run: |
-          mkdir -p keys
-          echo "${{ secrets.SSH_PUBLIC_KEY }}" > keys/id_ed25519.pub
-          chmod 644 keys/id_ed25519.pub
-          echo "SSH public key configured"
+          mkdir -p terraforrm/keys
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" > terraforrm/keys/id_ed25519.pub
+          chmod 644 terraforrm/keys/id_ed25519.pub
 
       - name: Terraform Init
-        run: |
-          terraform init
-          echo "Terraform initialized"
+        working-directory: ./terraforrm
+        run: terraform init
 
       - name: Terraform Validate
-        run: |
-          terraform validate
-          echo "Configuration is valid"
+        working-directory: ./terraforrm
+        run: terraform validate
 
       - name: Terraform Plan
-        run: |
-          terraform plan -out=tfplan -input=false
-          echo "Plan created"
+        working-directory: ./terraforrm
+        run: terraform plan -out=tfplan
 
       - name: Terraform Apply
-        run: |
-          terraform apply -auto-approve -input=false tfplan
-          echo "Infrastructure provisioned"
+        working-directory: ./terraforrm
+        run: terraform apply -auto-approve tfplan
 
-      - name: Get Outputs
-        id: outputs
+      - name: Get Terraform Outputs
+        id: tf_output
+        working-directory: ./terraforrm
         run: |
           SERVER_IP=$(terraform output -raw server_ip)
           S3_BUCKET=$(terraform output -raw s3_bucket_name)
-          ACCESS_KEY=$(terraform output -raw github_actions_access_key_id)
-          SECRET_KEY=$(terraform output -raw github_actions_secret_access_key)
           
-          echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
-          echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
-          echo "access_key=$ACCESS_KEY" >> $GITHUB_OUTPUT
-          echo "secret_key=$SECRET_KEY" >> $GITHUB_OUTPUT
+          echo "server_ip=${SERVER_IP}" >> $GITHUB_OUTPUT
+          echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
           
-          echo "###Infrastructure Provisioned" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Server IP | \`$SERVER_IP\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| S3 Bucket | \`$S3_BUCKET\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Region | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "Server IP: ${SERVER_IP}"
+          echo "S3 Bucket: ${S3_BUCKET}"
 
       - name: Wait for EC2 Instance
         run: |
-          echo "Waiting 60 seconds for instance to initialize..."
+          echo "Waiting for EC2 instance to be ready..."
           sleep 60
           
-          SERVER_IP="${{ steps.outputs.outputs.server_ip }}"
-          
-          echo "🔍 Testing SSH connectivity..."
+          # چک کردن SSH connectivity
           for i in {1..10}; do
-            if nc -zv -w5 $SERVER_IP 22 2>&1 | grep -q succeeded; then
-              echo "SSH port is open!"
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+               -i ~/.ssh/id_rsa ubuntu@${{ steps.tf_output.outputs.server_ip }} \
+               "echo 'SSH connection successful'"; then
+              echo "Server is ready!"
               break
             fi
-            echo "Attempt $i/10 - waiting 15s..."
-            sleep 15
+            echo "Attempt $i/10 - waiting 30s..."
+            sleep 30
           done
 
-      - name: Trigger Deployment
-        uses: peter-evans/repository-dispatch@v2
+  # ==========================================
+  # Job 2:Ansible
+  # ==========================================
+  ansible:
+    name: Configure & Deploy Application
+    runs-on: ubuntu-latest
+    needs: terraform
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: infrastructure-ready
-          client-payload: |
-            {
-              "server_ip": "${{ steps.outputs.outputs.server_ip }}",
-              "s3_bucket": "${{ steps.outputs.outputs.s3_bucket }}"
-            }
+          python-version: '3.10'
+
+      - name: Install Ansible
+        run: |
+          pip install ansible==${{ env.ANSIBLE_VERSION }}
+          ansible --version
+
+      - name: Setup SSH Key for Ansible
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ needs.terraform.outputs.server_ip }} >> ~/.ssh/known_hosts
+
+      - name: Update Ansible Inventory
+        run: |
+          cat > ansible/inventories/hosts.ini << EOF
+          [web_servers]
+          ${{ needs.terraform.outputs.server_ip }} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+          EOF
+          
+          echo "Inventory updated:"
+          cat ansible/inventories/hosts.ini
+
+      - name: Test Ansible Connection
+        working-directory: ./ansible
+        run: |
+          ansible all -i inventories/hosts.ini -m ping
+
+      - name: Run Ansible Playbook - Setup Docker
+        working-directory: ./ansible
+        run: |
+          echo "Installing Docker..."
+          ansible-playbook -i inventories/hosts.ini playbooks/setup.yml
+
+      - name: Run Ansible Playbook - Deploy Application
+        working-directory: ./ansible
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "Deploying application..."
+          ansible-playbook -i inventories/hosts.ini playbooks/deploy.yml \
+            -e "docker_username=${DOCKER_USERNAME}" \
+            -e "docker_password=${DOCKER_PASSWORD}"
+
+      - name: Verify Deployment
+        run: |
+          SERVER_IP=${{ needs.terraform.outputs.server_ip }}
+          
+          echo "Verifying deployment..."
+          
+          # چک کردن Docker containers
+          ssh -i ~/.ssh/id_rsa ubuntu@${SERVER_IP} << 'EOF'
+            echo " Running containers:"
+            docker ps
+            
+            echo ""
+            echo "Checking services:"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "mongo_db|test|nginx"
+          EOF
+          
+          #health
+          echo "Health check..."
+          sleep 10
+          
+          # تست Nginx
+          if curl -f http://${SERVER_IP}; then
+            echo "Nginx is responding!"
+          else
+            echo " Warning: Nginx not responding yet"
+          fi
+
+  # ==========================================
+  # Job 3: GitHub Secrets
+  # ==========================================
+  update-secrets:
+    name:  Update Backup Secrets
+    runs-on: ubuntu-latest
+    needs: [terraform, ansible]
+    
+    steps:
+      - name: Update Server IP Secret
+        run: |
+          echo "Server IP for backups: ${{ needs.terraform.outputs.server_ip }}"
+          echo "S3 Bucket: ${{ needs.terraform.outputs.s3_bucket }}"
+          echo ""
+          echo "MANUAL ACTION REQUIRED:"
+          echo "Please update these GitHub Secrets manually:"
+          echo "  - SERVER_IP: ${{ needs.terraform.outputs.server_ip }}"
+          echo "  - S3_BUCKET_NAME: ${{ needs.terraform.outputs.s3_bucket }}"
+
+  # ==========================================
+  # Job 4: final
+  # ==========================================
+  summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [terraform, ansible]
+    if: always()
+    
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server IP**: \`${{ needs.terraform.outputs.server_ip }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: \`${{ needs.terraform.outputs.s3_bucket }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Services" >> $GITHUB_STEP_SUMMARY
+          echo "- MongoDB (Port 27017)" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend API (Port 3000)" >> $GITHUB_STEP_SUMMARY
+          echo "- Nginx Reverse Proxy (Port 80)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Access" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application URL**: http://${{ needs.terraform.outputs.server_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **SSH Access**: \`ssh ubuntu@${{ needs.terraform.outputs.server_ip }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Automated backups will run every 12 hours" >> $GITHUB_STEP_SUMMARY
+          echo "2. Manual backup: Go to Actions → MongoDB Backup → Run workflow" >> $GITHUB_STEP_SUMMARY
+          echo "3. Monitor logs in CloudWatch (if configured)" >> $GITHUB_STEP_SUMMARY
