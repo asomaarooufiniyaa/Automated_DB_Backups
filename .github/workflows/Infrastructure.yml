@@ -59,9 +59,11 @@ jobs:
         working-directory: ./terraforrm
         run: terraform validate
 
-      - name: Terraform Plan
+      - name: Terraform Apply
         working-directory: ./terraforrm
-        run: terraform plan -out=tfplan
+        env:
+           TF_VAR_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: terraform apply -auto-approve tfplan
 
       - name: Terraform Apply
         working-directory: ./terraforrm
@@ -164,7 +166,7 @@ jobs:
           
           echo "Verifying deployment..."
           
-          # چک کردن Docker containers
+          #Docker containers
           ssh -i ~/.ssh/id_rsa ubuntu@${SERVER_IP} << 'EOF'
             echo " Running containers:"
             docker ps
