@@ -1,81 +1,86 @@
-name: Deploy App via Ansible
+name: Provision Infrastructure & Configure Backup
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'ansible/**'
-      - 'app/**'
-  workflow_dispatch:
-
+  workflow_dispatch: 
 env:
-  ANSIBLE_VERSION: 2.15.0
-  SERVER_IP: ${{ secrets.SERVER_IP }}
+  TF_VERSION: 1.5.0
   AWS_REGION: eu-north-1
 
 jobs:
-  deploy:
-    name: Configure & Deploy
+  provision:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
-      - name: Checkout Repository
+      # ------------------------------
+      # ------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      # ------------------------------
+      # Terraform
+      # ------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          python-version: '3.10'
+          terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
+      # ------------------------------
+      #AWS credentials
+      # ------------------------------
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install Ansible
-        run: pip install ansible==${{ env.ANSIBLE_VERSION }}
+      # ------------------------------
+      # Terraform
+      # ------------------------------
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
 
-      - name: Setup SSH Access
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+      - name: Terraform Validate
+        working-directory: ./terraform
+        run: terraform validate
 
-      - name: Update Ansible Inventory
-        run: |
-          mkdir -p ansible/inventories
-          cat > ansible/inventories/hosts.ini <<EOF
-          [web_servers]
-          ${{ env.SERVER_IP }} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
-          EOF
-          cat ansible/inventories/hosts.ini
-
-      - name: Test Connection
-        working-directory: ./ansible
-        run: ansible all -i inventories/hosts.ini -m ping
-
-      - name: Run Setup Playbook
-        working-directory: ./ansible
-        run: ansible-playbook -i inventories/hosts.ini playbooks/setup.yml
-
-      - name: Run Deploy Playbook
-        working-directory: ./ansible
+      - name: Terraform Apply
+        working-directory: ./terraform
         env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          ansible-playbook -i inventories/hosts.ini playbooks/deploy.yml \
-            -e "docker_username=${DOCKER_USERNAME}" \
-            -e "docker_password=${DOCKER_PASSWORD}"
+          TF_VAR_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: terraform apply -auto-approve
 
-      - name: Verify Nginx
+      # ------------------------------
+      #Terraform
+      # ------------------------------
+      - name: Get Terraform Outputs
+        id: tf_outputs
+        working-directory: ./terraform
         run: |
-          echo "Checking Nginx on ${SERVER_IP}..."
-          sleep 5
-          curl -I http://${SERVER_IP} || echo "Nginx not ready yet"
+          echo "SERVER_IP=$(terraform output -raw server_ip)" >> $GITHUB_ENV
+          echo "Server IP: $(terraform output -raw server_ip)"
+
+      # ------------------------------
+      # مرحله ۶: نصب Ansible
+      # ------------------------------
+      - name: Install Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+
+      # ------------------------------
+      #(setup.yml)
+      # ------------------------------
+      - name: Run Ansible Playbook
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook -i "${SERVER_IP}," \
+            -u ubuntu \
+            --private-key "${{ secrets.SSH_PRIVATE_KEY }}" \
+            ansible/playbooks/setup.yml
