@@ -1,0 +1,81 @@
+name: Deploy App via Ansible
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ansible/**'
+      - 'app/**'
+  workflow_dispatch:
+
+env:
+  ANSIBLE_VERSION: 2.15.0
+  SERVER_IP: ${{ secrets.SERVER_IP }}
+  AWS_REGION: eu-north-1
+
+jobs:
+  deploy:
+    name: Configure & Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Ansible
+        run: pip install ansible==${{ env.ANSIBLE_VERSION }}
+
+      - name: Setup SSH Access
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Update Ansible Inventory
+        run: |
+          mkdir -p ansible/inventories
+          cat > ansible/inventories/hosts.ini <<EOF
+          [web_servers]
+          ${{ env.SERVER_IP }} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+          EOF
+          cat ansible/inventories/hosts.ini
+
+      - name: Test Connection
+        working-directory: ./ansible
+        run: ansible all -i inventories/hosts.ini -m ping
+
+      - name: Run Setup Playbook
+        working-directory: ./ansible
+        run: ansible-playbook -i inventories/hosts.ini playbooks/setup.yml
+
+      - name: Run Deploy Playbook
+        working-directory: ./ansible
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          ansible-playbook -i inventories/hosts.ini playbooks/deploy.yml \
+            -e "docker_username=${DOCKER_USERNAME}" \
+            -e "docker_password=${DOCKER_PASSWORD}"
+
+      - name: Verify Nginx
+        run: |
+          echo "Checking Nginx on ${SERVER_IP}..."
+          sleep 5
+          curl -I http://${SERVER_IP} || echo "Nginx not ready yet"
