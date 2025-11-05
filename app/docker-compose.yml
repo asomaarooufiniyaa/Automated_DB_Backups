@@ -16,8 +16,7 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - ./mongodata:/data/db
-  
+      - /mnt/mongo-data:/data/db
   nginx:
     image: nginx:alpine
     container_name: nginx-proxy
