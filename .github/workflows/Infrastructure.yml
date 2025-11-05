@@ -35,22 +35,22 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Initialize Terraform
-        working-directory: ./terraform
+        working-directory: ./terraforrm
         run: terraform init
 
       - name: Validate Terraform
-        working-directory: ./terraform
+        working-directory: ./terraforrm
         run: terraform validate
 
       - name: Terraform Apply
-        working-directory: ./terraform
+        working-directory: ./terraforrm
         env:
           TF_VAR_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
         run: terraform apply -auto-approve
 
       - name: Get Terraform Outputs
         id: outputs
-        working-directory: ./terraform
+        working-directory: ./terraforrm
         run: |
           echo "SERVER_IP=$(terraform output -raw server_ip)" >> $GITHUB_ENV
           echo "S3_BUCKET=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
