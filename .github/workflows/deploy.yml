@@ -36,7 +36,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: eu-north-1
 
       # ------------------------------
       # Terraform
@@ -64,23 +64,25 @@ jobs:
         run: |
           echo "SERVER_IP=$(terraform output -raw server_ip)" >> $GITHUB_ENV
           echo "Server IP: $(terraform output -raw server_ip)"
-
-      # ------------------------------
-      # مرحله ۶: نصب Ansible
-      # ------------------------------
-      - name: Install Ansible
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ansible
-
       # ------------------------------
       #(setup.yml)
       # ------------------------------
-      - name: Run Ansible Playbook
-        env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
+      - name: Setup SSH Key for Ansible
         run: |
-          ansible-playbook -i "${SERVER_IP}," \
-            -u ubuntu \
-            --private-key "${{ secrets.SSH_PRIVATE_KEY }}" \
-            ansible/playbooks/setup.yml
+          mkdir -p ~/.ssh
+            echo "${{ secrets.DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/mykey
+            chmod 600 ~/.ssh/mykey
+
+      - name: Setup Ansible
+        run: |
+          sudo apt update
+          sudo apt install ansible -y
+      - name: Docker login
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+        
+      - name: Run Ansible Playbooks
+        run: |
+          ansible-playbook -i ansible/inventories/hosts.ini ansible/playbooks/setup.yml
+          ansible-playbook -i ansible/inventories/hosts.ini ansible/playbooks/deploy.yml
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: False
