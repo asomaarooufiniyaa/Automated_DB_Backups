@@ -4,11 +4,6 @@
   become: true
   tasks:
 
-    - name: Pull Docker image from Docker Hub
-      community.docker.docker_image:
-        name: asomaaroufiniyaa/todo-api-app:latest
-        source: pull
-
     - name: Copy nginx.conf to server
       copy:
         src: ../../app/nginx.conf
