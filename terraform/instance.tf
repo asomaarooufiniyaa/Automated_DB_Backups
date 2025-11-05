@@ -1,5 +1,5 @@
 resource "aws_instance" "web_server" {
-  count                  = 3
+  count                  = 1
   ami                    = data.aws_ami.server_ami.id
   instance_type          = "t3.micro"
   key_name               = aws_key_pair.mykey.key_name

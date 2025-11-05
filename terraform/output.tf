@@ -1,3 +1,3 @@
-output "servers_ip" {
+output "server_ip" {
   value = [for instance in aws_instance.web_server : instance.public_ip]
 }
