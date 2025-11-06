@@ -123,8 +123,8 @@ app.get('/', async (req, res) => {
 
                 <!-- Form to submit new entry -->
                 <form method="POST" action="/submit">
-                    <input type="text" name="name" placeholder="Name" required />
-                    <input type="number" name="age" placeholder="Age" min="0" required />
+                    <input type="text" name="name" placeholder="Your Name" required />
+                    <input type="number" name="age" placeholder="Your Age" min="0" required />
                     <button class="btn" type="submit">Submit</button>
                 </form>
 
