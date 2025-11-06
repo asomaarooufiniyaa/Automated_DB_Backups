@@ -4,3 +4,4 @@ terraform.tfstate.backup
 /mongodata
 /node_modules.terraform/
 .terraform/
+.gitignore
