@@ -1,142 +1,273 @@
-# Automated Infrastructure Deployment and Application Setup
+## 🚀 Automated Infrastructure Deployment and Application Setup
 
-This project automates the provisioning of cloud infrastructure on AWS using Terraform, and the deployment of a Dockerized application using Ansible.
+### *Full Infrastructure Automation on AWS using Terraform, Ansible, and Docker*
 
----
+### 📖 Table of Contents
 
-## Table of Contents
-- [Project Overview](#project-overview)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Setup & Deployment](#setup--deployment)
-- [Usage](#usage)
-- [Challenges Faced](#challenges-faced)
-- [License](#license)
-
----
-
-## Project Overview
-
-The purpose of this project is to automate the following tasks:
-
-1. Provision an AWS infrastructure including:
-   - VPC, subnet, internet gateway, route table
-   - Security group allowing SSH, HTTP, and HTTPS
-   - EC2 instance with public IP
-   - SSH key management
-
-2. Deploy a Dockerized web application on the provisioned EC2 instance using Ansible.
-
-3. Run multiple containers:
-   - `test` application container
-   - `mongo` database container
-   - `nginx` reverse proxy
+* [Overview](#overview)
+* [Architecture](#architecture)
+* [Features](#features)
+* [Prerequisites](#prerequisites)
+* [Setup & Deployment](#setup--deployment)
+* [Persistent MongoDB with EBS](#persistent-mongodb-with-ebs)
+* [CI/CD Workflow](#cicd-workflow)
+* [Challenges & Solutions](#challenges--solutions)
+* [Future Improvements](#future-improvements)
+* [License](#license)
 
 ---
 
-## Architecture
+## 🧠 Overview
+
+This project automates **end-to-end infrastructure provisioning** and **application deployment** on AWS — entirely through **Terraform** and **Ansible**, without any manual steps.
+
+It provisions:
+
+* A fully functional AWS network stack (VPC, Subnet, Route Table, Security Groups, etc.)
+* An EC2 instance with SSH access and Docker installed
+* Automatic deployment of a **multi-container application** using **Docker Compose**
+
+  * `web` application
+  * `mongo` database
+  * `nginx` reverse proxy
+
+Recently, the setup was enhanced with an **Amazon EBS Volume** attached to persist MongoDB data even after EC2 termination — making the infrastructure both *automated* and *resilient*.
+
+---
+
+## 🏗️ Architecture
+
+### High-Level View
 
 ```
-
 AWS Cloud
-┌───────────────────────┐
-│       VPC             │
-│  ┌───────────────┐    │
-│  │ Subnet        │    │
-│  │ ┌─────────┐  │    │
-│  │ │ EC2     │  │    │
-│  │ │         │  │    │
-│  │ │ Docker  │  │    │
-│  │ │ Compose │  │    │
-│  │ └─────────┘  │    │
-│  └───────────────┘    │
-└───────────────────────┘
-
-Docker Containers:
-
-* `test` app
-* `mongo` database
-* `nginx` reverse proxy
-
-````
-
----
-
-## Prerequisites
-
-- AWS account with access keys
-- Terraform 1.5+
-- Ansible 2.15+
-- Docker & Docker Compose (installed via Ansible on the EC2 instance)
-- GitHub repository with required secrets:
-  - `AWS_ACCESS_KEY_ID`
-  - `AWS_SECRET_ACCESS_KEY`
-  - `SSH_PRIVATE_KEY`
-  - `DOCKER_USERNAME`
-  - `DOCKER_PASSWORD`
+┌────────────────────────────┐
+│          VPC               │
+│  ┌────────────────────┐    │
+│  │      Subnet         │   │
+│  │ ┌────────────────┐ │   │
+│  │ │     EC2        │ │   │
+│  │ │ ┌────────────┐ │ │   │
+│  │ │ │ Docker     │ │ │   │
+│  │ │ │ Compose    │ │ │   │
+│  │ │ ├────────────┤ │ │   │
+│  │ │ │ Nginx      │ │ │   │
+│  │ │ │ App        │ │ │   │
+│  │ │ │ MongoDB    │ │ │   │
+│  │ │ └────────────┘ │ │   │
+│  │ │     │           │ │   │
+│  │ │     ▼           │ │   │
+│  │ │  EBS Volume     │ │   │
+│  │ └────────────────┘ │   │
+│  └────────────────────┘   │
+└────────────────────────────┘
+```
 
 ---
 
-## Setup & Deployment
+## ✨ Features
 
-1. Clone the repository:
+✅ Automated provisioning of AWS infrastructure with Terraform
+✅ Automated server setup and Docker deployment with Ansible
+✅ Multi-container application deployment with Docker Compose
+✅ Persistent MongoDB data storage using EBS
+✅ CI/CD pipeline through GitHub Actions
+✅ Fully reproducible and idempotent setup
+
+---
+
+## 🧩 Prerequisites
+
+* **AWS account** with IAM access keys
+* **Terraform ≥ 1.5**
+* **Ansible ≥ 2.15**
+* **Docker & Docker Compose** (installed automatically via Ansible)
+* GitHub repository secrets:
+
+  * `AWS_ACCESS_KEY_ID`
+  * `AWS_SECRET_ACCESS_KEY`
+  * `SSH_PRIVATE_KEY`
+  * `DOCKER_USERNAME`
+  * `DOCKER_PASSWORD`
+
+---
+
+## ⚙️ Setup & Deployment
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/asomaarooufiniyaa/Automated_DB_Backups.git
+   cd Automated_DB_Backups
+   ```
+
+2. **Configure GitHub secrets** (for Terraform & Ansible automation).
+
+3. **CI/CD Execution**
+
+   * GitHub Actions workflow (`.github/workflows/provision.yml`) will:
+
+     1. Initialize and apply Terraform
+     2. Provision AWS resources (VPC, EC2, Security Groups, etc.)
+     3. Configure EC2 instance via Ansible
+     4. Deploy Dockerized application automatically
+
+---
+
+## 💾 Persistent MongoDB with EBS
+
+To make MongoDB data **persistent** beyond EC2 termination, an **EBS volume** was attached and mounted at `/mnt/mongo-data`.
+
+### Key Configuration
+
+```yaml
+# docker-compose.yml
+services:
+  mongo:
+    image: mongo
+    container_name: mongo
+    volumes:
+      - /mnt/mongo-data:/data/db
+```
+
+### Steps Implemented
+
+1. Created and attached an EBS volume via AWS Console / Terraform
+2. Verified the volume:
+
+   ```bash
+   sudo file -s /dev/nvme1n1
+   ```
+3. Mounted it:
+
+   ```bash
+   sudo mkdir -p /mnt/mongo-data
+   sudo mount /dev/nvme1n1 /mnt/mongo-data
+   ```
+4. Ensured persistence across reboots with `/etc/fstab`
+
+✅ **Result:** MongoDB automatically detects and uses previous data after redeployment.
+
+---
+
+## 🔄 CI/CD Workflow
+
+* **Terraform Stage:**
+
+  * Validates and applies infrastructure configuration
+  * Outputs EC2 IP and SSH connection details
+
+* **Ansible Stage:**
+
+  * Installs Docker, Docker Compose, and dependencies
+  * Clones the application repo on EC2
+  * Runs `docker-compose up -d` for all containers
+
+* **EBS Mounting & Volume Management:**
+
+  * Handled post-provisioning or via Ansible role
+  * Ensures data directory always points to EBS
+
+---
+
+## ⚠️ Challenges & Solutions
+
+### 🧩 1. SSH Key Issues in CI/CD
+
+**Problem:**
+GitHub Actions runner failed to connect to EC2 due to Windows-style line endings (`\r`) in private key.
+
+**Solution:**
+Added a preprocessing step in workflow:
 
 ```bash
-git clone https://github.com/asomaarooufiniyaa/Automated_DB_Backups.git
-cd Automated_DB_Backups
-````
-
-2. Configure GitHub secrets for CI/CD (GitHub Actions).
-
-3. GitHub Actions workflow will perform:
-
-   * Terraform init, validate, and apply
-   * Ansible playbook execution
-   * Docker container deployment
-
-4. Directory structure:
-
-```
-├── ansible/
-│   ├── inventories/
-│   │   └── hosts.ini
-│   └── playbooks/
-│       ├── setup.yml
-│       └── deploy.yml
-├── app/
-│   ├── docker-compose.yml
-│   └── nginx.conf
-├── terraform/
-│   ├── instance.tf
-│   ├── network.tf
-│   ├── security.tf
-│   └── outputs.tf
-└── .github/workflows/provision.yml
+tr -d '\r' < private_key.pem > fixed_key.pem
+chmod 600 fixed_key.pem
 ```
 
 ---
 
-## Usage
+### 🐳 2. Docker Volume Mount Errors
 
-* After deployment, you can access the application via the public IP of the EC2 instance.
-* Docker containers are managed with `docker-compose` through Ansible.
+**Problem:**
+Docker containers failed because `/mnt/mongo-data` didn’t exist or had wrong permissions on EC2.
+
+**Solution:**
+Created the directory and set correct ownership **before running docker-compose**:
+
+```bash
+sudo mkdir -p /mnt/mongo-data
+sudo chown -R 999:999 /mnt/mongo-data
+```
 
 ---
 
-## Challenges Faced
+### 🧱 3. EBS Volume Not Recognized
 
-1. **SSH Key Issues on CI/CD**
-   Initially, the workflow failed to connect to EC2 due to key format issues. Fixed by using `tr -d '\r'` to remove Windows-style line endings from the private key.
+**Problem:**
+After attaching the EBS, `mkfs` failed or volume showed as already mounted.
 
-2. **Ansible & Docker Integration**
-   Running Docker containers with mounted volumes caused errors when the host path did not exist or had wrong permissions. Solved by copying configuration files to the correct paths on the server before running `docker-compose`.
+**Solution:**
+Checked mounts:
 
-3. **GitHub Actions Permissions**
-   Managing secrets and environment variables correctly was essential for Terraform and Ansible to work on GitHub runners.
+```bash
+mount | grep nvme
+```
 
-4. **Terraform Resource Conflicts**
-   Errors like `InvalidKeyPair.Duplicate` occurred when the AWS key already existed. Solved by checking existing resources or importing them if needed.
+and verified filesystem with:
 
-## License
+```bash
+sudo file -s /dev/nvme1n1
+```
 
-This project is open source and available under the MIT License.
+Mounted it safely to `/mnt/mongo-data`.
+
+---
+
+### ⚙️ 4. Terraform KeyPair Conflict
+
+**Problem:**
+`InvalidKeyPair.Duplicate` error appeared when key already existed in AWS.
+
+**Solution:**
+Used:
+
+```bash
+terraform import aws_key_pair.my_key existing-key-name
+```
+
+to sync with existing AWS key.
+
+---
+
+### 🧠 5. Persistent MongoDB Across EC2 Rebuild
+
+**Problem:**
+MongoDB lost data after new EC2 creation.
+
+**Solution:**
+Detached the existing EBS from the old instance and reattached it to the new one.
+Mounted at the same path and ensured Docker Compose points to `/mnt/mongo-data`.
+
+---
+
+## 🔮 Future Improvements
+
+* Automate EBS mounting directly through **Ansible role**
+* Add **CloudWatch monitoring** for MongoDB and EC2 performance
+* Implement **S3 backups** of EBS snapshots
+* Extend setup for **multi-environment (dev/stage/prod)** deployment
+
+---
+
+## 🪪 License
+
+This project is open source and available under the **MIT License**.
+
+---
+
+🔥 **In short:**
+This project demonstrates **real-world DevOps automation**, combining Terraform, Ansible, Docker, and AWS EBS for a fully automated, fault-tolerant infrastructure — deployable in a single workflow.
+
+---
+
