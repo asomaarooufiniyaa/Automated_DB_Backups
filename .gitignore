@@ -1,7 +1,0 @@
-terraform.tfstate
-terraform.tfstate.backup
-.terraform/.terraform/
-/mongodata
-/node_modules.terraform/
-.terraform/
-.gitignore
