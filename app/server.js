@@ -27,6 +27,17 @@ MongoClient.connect(MONGO_URI, { useUnifiedTopology: true })
         console.error('Failed to connect to MongoDB:', err);
     });
 
+// Helper for server-side escaping used in template
+function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Main route with form and list of saved entries
 app.get('/', async (req, res) => {
     let entries = [];
@@ -110,10 +121,18 @@ app.get('/', async (req, res) => {
                 <h1>Enter Your Data</h1>
                 <p>Provide your name and age and click submit.</p>
 
+                <!-- Form to submit new entry -->
                 <form method="POST" action="/submit">
                     <input type="text" name="name" placeholder="Name" required />
                     <input type="number" name="age" placeholder="Age" min="0" required />
                     <button class="btn" type="submit">Submit</button>
+                </form>
+
+                <!-- Form to delete all entries -->
+                <form method="POST" action="/delete-all" onsubmit="return confirm('Are you sure you want to delete all entries?');">
+                    <button class="btn" type="submit" style="background-color:#e74c3c;color:#fff;margin-top:10px;">
+                        Delete All Entries
+                    </button>
                 </form>
 
                 <div class="entries">
@@ -126,38 +145,15 @@ app.get('/', async (req, res) => {
                     `).join('')}
                 </div>
             </div>
-            <script>
-                // Minimal client-side escaping function for this rendered page
-                function escapeHtml(str) {
-                    return String(str)
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;')
-                        .replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#39;');
-                }
-            </script>
         </body>
         </html>
     `);
 });
 
-// Helper for server-side escaping used in template
-function escapeHtml(str) {
-    if (str == null) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
 // Handle form submission
 app.post('/submit', async (req, res) => {
     const { name, age } = req.body;
 
-    // Basic validation
     if (!name || typeof name !== 'string' || !name.trim()) {
         return res.status(400).send('Invalid name');
     }
@@ -166,24 +162,33 @@ app.post('/submit', async (req, res) => {
         return res.status(400).send('Invalid age');
     }
 
-    if (!db) {
-        return res.status(500).send('Not connected to database');
-    }
+    if (!db) return res.status(500).send('Not connected to database');
 
     try {
         await db.collection('users').insertOne({ name: name.trim(), age: ageNum, createdAt: new Date() });
-        return res.redirect('/');
+        res.redirect('/');
     } catch (err) {
         console.error('Insert failed:', err);
-        return res.status(500).send('Failed to save entry');
+        res.status(500).send('Failed to save entry');
     }
 });
 
-// Example MongoDB route
-app.get('/db-status', async (req, res) => {
-    if (!db) {
-        return res.status(500).json({ status: 'error', message: 'Not connected to MongoDB' });
+// Route to delete all entries
+app.post('/delete-all', async (req, res) => {
+    if (!db) return res.status(500).send('Not connected to database');
+
+    try {
+        await db.collection('users').deleteMany({});
+        res.redirect('/');
+    } catch (err) {
+        console.error('Failed to delete entries:', err);
+        res.status(500).send('Failed to delete entries');
     }
+});
+
+// Optional MongoDB status route
+app.get('/db-status', async (req, res) => {
+    if (!db) return res.status(500).json({ status: 'error', message: 'Not connected to MongoDB' });
     try {
         const collections = await db.listCollections().toArray();
         res.json({ status: 'ok', collections: collections.map(c => c.name) });
